@@ -2,7 +2,7 @@ pipeline {
     agent any
 
     parameters {
-        string(name: 'REPO_URL', defaultValue: 'https://github.com/ThisIsMikeyS/cicd-demo-app', description: 'HTTPS-ссылка на ваш Fork репозитория')
+        string(name: 'REPO_URL', defaultValue: 'https://github.com/rosaperlamutr-cpu/cicd-demo-app.git', description: 'HTTPS-ссылка на ваш Fork репозитория')
         string(name: 'GIT_BRANCH', defaultValue: 'master', description: 'Ветка для сборки')
         booleanParam(name: 'RUN_TESTS', defaultValue: true, description: 'Выполнять unit-тесты')
     }
