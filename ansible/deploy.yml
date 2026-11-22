@@ -1,0 +1,34 @@
+---
+- name: Deploy application container locally
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  collections:
+    - community.docker
+
+  vars:
+    container_name: student-app
+    image_name: "student-app:{{ build_number }}-{{ short_sha }}"
+    app_port: "{{ host_port }}"
+
+  tasks:
+    - name: Ensure the application container is running
+      community.docker.docker_container:
+        name: "{{ container_name }}"
+        image: "{{ image_name }}"
+        state: started
+        restart_policy: unless-stopped
+        published_ports:
+          - "127.0.0.1:{{ app_port }}:8080"
+      register: container_result
+
+    - name: Wait for application to become healthy
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ app_port }}/health"
+        method: GET
+        status_code: 200
+        return_content: true
+      register: health_check
+      until: health_check.status == 200 and health_check.json.status == "ok"
+      retries: 10
+      delay: 3
