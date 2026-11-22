@@ -42,7 +42,7 @@ pipeline {
         stage('Lint') {
             when { expression { params.RUN_TESTS } }
             steps {
-                sh 'pip install flake8'
+                sh 'pip3 install flake8'
                 sh 'flake8 src tests app.py'
             }
         }
@@ -50,7 +50,7 @@ pipeline {
         stage('Test') {
             when { expression { params.RUN_TESTS } }
             steps {
-                sh 'pip install coverage'
+                sh 'pip3 install coverage'
                 sh 'coverage run -m unittest discover -s tests'
                 sh 'coverage xml -o coverage.xml'
             }
