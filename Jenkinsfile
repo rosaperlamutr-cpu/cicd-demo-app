@@ -42,17 +42,17 @@ pipeline {
         stage('Lint') {
             when { expression { params.RUN_TESTS } }
             steps {
-                sh 'pip3 install flake8'
-                sh 'flake8 src tests app.py'
+                sh 'python3 -m pip install flake8 --break-system-packages'
+                sh 'python3 -m flake8 src tests app.py'
             }
         }
 
         stage('Test') {
             when { expression { params.RUN_TESTS } }
             steps {
-                sh 'pip3 install coverage'
-                sh 'coverage run -m unittest discover -s tests'
-                sh 'coverage xml -o coverage.xml'
+                sh 'python3 -m pip install coverage --break-system-packages'
+                sh 'python3 -m coverage run -m unittest discover -s tests'
+                sh 'python3 -m coverage xml -o coverage.xml'
             }
             post {
                 always { archiveArtifacts artifacts: 'coverage.xml', allowEmptyArchive: true }
