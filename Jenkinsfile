@@ -2,95 +2,95 @@ pipeline {
     agent any
 
     parameters {
-        string(name: 'REPO_URL', defaultValue: 'https://github.com/rosaperlamutr-cpu/cicd-demo-app.git', description: 'HTTPS-ссылка на ваш Fork репозитория')
+        string(name: 'REPO_URL', defaultValue: 'https://github.com/rosaperlamutr-cpu/cicd-demo-app.git', description: 'URL вашего форка')
         string(name: 'GIT_BRANCH', defaultValue: 'master', description: 'Ветка для сборки')
-        booleanParam(name: 'RUN_TESTS', defaultValue: true, description: 'Выполнять unit-тесты')
+        booleanParam(name: 'RUN_TESTS', defaultValue: true, description: 'Запускать тесты и линтер')
+        booleanParam(name: 'DEPLOY', defaultValue: false, description: 'Развернуть локально')
+        string(name: 'APP_PORT', defaultValue: '18080', description: 'Порт хоста (1024-65535)')
+    }
+
+    environment {
+        SHORT_SHA = "${env.GIT_COMMIT?.take(7) ?: 'unknown'}"
+        IMAGE_TAG = "student-app:${env.BUILD_NUMBER}-${env.SHORT_SHA}"
     }
 
     stages {
         stage('Checkout') {
             steps {
                 script {
-                    checkout([$class: 'GitSCM', 
-                        branches: [[name: "*/${params.GIT_BRANCH}"]], 
-                        userRemoteConfigs: [[url: params.REPO_URL]]
-                    ])
-                    
-                    def gitBranch = sh(script: "git rev-parse --abbrev-ref HEAD", returnStdout: true).trim()
-                    def gitCommit = sh(script: "git rev-parse HEAD", returnStdout: true).trim()
-                    
-                    echo "Ветка: ${gitBranch}"
-                    echo "SHA коммита: ${gitCommit}"
-                    env.GIT_COMMIT_SHA = gitCommit
+                    if (!params.REPO_URL?.trim()) error "REPO_URL cannot be empty."
+                    if (!params.GIT_BRANCH?.trim()) error "GIT_BRANCH cannot be empty."
+                    def port = params.APP_PORT as Integer
+                    if (port < 1024 || port > 65535) error "APP_PORT must be 1024-65535."
                 }
+                git url: params.REPO_URL, branch: params.GIT_BRANCH
+                echo "Checked out ${env.GIT_COMMIT} (Build #${env.BUILD_NUMBER})"
             }
         }
 
         stage('Validate') {
             steps {
                 script {
-                    def requiredFiles = ['README.md', 'requirements.txt', 'src', 'tests']
-                    def missing = []
-                    
-                    for (file in requiredFiles) {
-                        if (!fileExists(file)) {
-                            missing.add(file)
-                        }
-                    }
-                    
-                    if (!missing.isEmpty()) {
-                        error "Отсутствуют обязательные элементы: ${missing.join(', ')}"
-                    }
+                    def requiredFiles = ['Dockerfile', 'Jenkinsfile', 'ansible/deploy.yml', 'app.py']
+                    def missingFiles = requiredFiles.findAll { !fileExists(it) }
+                    if (!missingFiles.isEmpty()) error "Missing files: ${missingFiles.join(', ')}"
+                    if (params.DEPLOY && !params.RUN_TESTS) error "DEPLOY=true запрещен при RUN_TESTS=false!"
                 }
+            }
+        }
+
+        stage('Lint') {
+            when { expression { params.RUN_TESTS } }
+            steps {
+                sh 'pip install flake8'
+                sh 'flake8 src tests app.py'
             }
         }
 
         stage('Test') {
-            when {
-                expression { return params.RUN_TESTS }
-            }
+            when { expression { params.RUN_TESTS } }
             steps {
-                script {
-                    if (isUnix()) {
-                        sh 'python3 -m unittest discover -s tests -v'
-                    } else {
-                        bat 'python -m unittest discover -s tests -v'
-                    }
-                }
+                sh 'pip install coverage'
+                sh 'coverage run -m unittest discover -s tests'
+                sh 'coverage xml -o coverage.xml'
+            }
+            post {
+                always { archiveArtifacts artifacts: 'coverage.xml', allowEmptyArchive: true }
             }
         }
 
-        stage('Build') {
+        stage('Build Image') {
             steps {
                 script {
-                    def buildInfo = "Номер сборки Jenkins: ${env.BUILD_NUMBER}\nSHA коммита: ${env.GIT_COMMIT_SHA}"
+                    sh "docker build -t ${env.IMAGE_TAG} ."
+                    def buildInfo = "SHA: ${env.GIT_COMMIT}\nBranch: ${params.GIT_BRANCH}\nBuild: ${env.BUILD_NUMBER}\nImage: ${env.IMAGE_TAG}"
                     writeFile file: 'build-info.txt', text: buildInfo
-                    
-                    if (isUnix()) {
-                        sh 'tar -czf app.tar.gz --exclude=app.tar.gz --exclude=.git .'
-                    } else {
-                        bat 'tar -czf app.tar.gz --exclude=app.tar.gz --exclude=.git .'
-                    }
+                    archiveArtifacts artifacts: 'build-info.txt'
                 }
             }
         }
 
-        stage('Archive') {
+        stage('Deploy') {
+            when { expression { params.DEPLOY } }
             steps {
-                archiveArtifacts artifacts: 'app.tar.gz', fingerprint: true
+                sh """
+                    ansible-playbook ansible/deploy.yml \
+                    -e "build_number=${env.BUILD_NUMBER}" \
+                    -e "short_sha=${env.SHORT_SHA}" \
+                    -e "host_port=${params.APP_PORT}"
+                """
+            }
+        }
+
+        stage('Verify') {
+            when { expression { params.DEPLOY } }
+            steps {
+                sh "curl --fail http://127.0.0.1:${params.APP_PORT}/health"
             }
         }
     }
 
     post {
-        success {
-            echo 'Сборка успешно завершена.'
-        }
-        failure {
-            echo 'Сборка завершилась с ошибкой.'
-        }
-        always {
-            echo "Статус сборки: ${currentBuild.currentResult}"
-        }
+        always { echo "Pipeline finished: ${currentBuild.currentResult}" }
     }
 }
